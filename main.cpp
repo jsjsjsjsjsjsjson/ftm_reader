@@ -7,7 +7,6 @@ FTM_FILE ftm;
 
 int main() {
     ftm.open_ftm(ftm_file_name);
-    ftm.read_ftm_metadata();
-    ftm.read_ftm_instrument();
+    ftm.read_ftm_all();
     return 0;
 }
