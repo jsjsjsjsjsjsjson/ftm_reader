@@ -3,9 +3,11 @@
 #include "ftm_file.h"
 
 char *ftm_file_name = "5_pancake.ftm";
+FTM_FILE ftm;
 
 int main() {
-    FILE *ftm_file = fopen(ftm_file_name, "rb+");
-    read_ftm(ftm_file);
+    ftm.open_ftm(ftm_file_name);
+    ftm.read_ftm_metadata();
+    ftm.read_ftm_instrument();
     return 0;
 }
