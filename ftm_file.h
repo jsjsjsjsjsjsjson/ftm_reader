@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <vector>
 
 typedef struct __attribute__((packed)) {
     char id[18];
@@ -81,15 +82,33 @@ typedef struct __attribute__((packed)) {
     char name[64];
 } instrument_t;
 
-typedef struct __attribute__((packed)) {
+typedef struct {
     uint32_t index;
     uint32_t type;
     uint8_t length;
     uint32_t loop;
-    int8_t data[256];
+    std::vector<int8_t> data;
     uint32_t release;
     uint32_t setting;
 } sequences_t;
+
+typedef struct {
+    sequences_t vol;
+    sequences_t arp;
+    sequences_t pit;
+    sequences_t hip;
+    sequences_t dty;
+} sequ_group_t;
+
+uint32_t find_max(uint32_t arr[], size_t n) {
+    uint32_t max = arr[0];
+    for (size_t i = 1; i < n; i++) {
+        if (arr[i] > max) {
+            max = arr[i];
+        }
+    }
+    return max;
+}
 
 class FTM_FILE {
 public:
@@ -102,8 +121,9 @@ public:
     INSTRUMENT_BLOCK inst_block;
     SEQUENCES_BLOCK seq_block;
 
-    instrument_t *instrument;
-    sequences_t *sequences;
+    uint32_t sequ_max;
+    std::vector<sequ_group_t> sequences;
+    std::vector<instrument_t> instrument;
 
     int open_ftm(const char *filename) {
         ftm_file = fopen(filename, "rb+");
@@ -182,18 +202,19 @@ public:
     }
 
     void read_instrument_data() {
-        printf("ALLOC MEM...\n");
-        instrument = new instrument_t[inst_block.inst_num];
-        printf("SIZE: %gKB\n", (sizeof(instrument_t) * inst_block.inst_num) / 1024.0f);
+        instrument.clear();
         printf("\nREADING INSTRUMENT, COUNT=%d\n", inst_block.inst_num);
         for (int i = 0; i < inst_block.inst_num; i++) {
+            instrument_t inst_tmp;
             printf("\nREADING INSTRUMENT #%02X...\n", i);
-            fread(&instrument[i], sizeof(instrument_t) - 64, 1, ftm_file);
-            fread(&instrument[i].name, instrument[i].name_len, 1, ftm_file);
+            fread(&inst_tmp, sizeof(instrument_t) - 64, 1, ftm_file);
+            fread(&inst_tmp.name, inst_tmp.name_len, 1, ftm_file);
+            inst_tmp.name[inst_tmp.name_len] = '\0';
+            instrument.push_back(inst_tmp);
             printf("%02X->NAME: %s\n", instrument[i].index, instrument[i].name);
             printf("TYPE: 0x%X\n", instrument[i].type);
             printf("SEQU COUNT: %d\n", instrument[i].seq_count);
-            printf("SEQU DATA: ");
+            printf("SEQU DATA:\n");
             printf("VOL: %d %d\n", instrument[i].seq_index[0].enable, instrument[i].seq_index[0].seq_index);
             printf("ARP: %d %d\n", instrument[i].seq_index[1].enable, instrument[i].seq_index[1].seq_index);
             printf("PIT: %d %d\n", instrument[i].seq_index[2].enable, instrument[i].seq_index[2].seq_index);
@@ -212,31 +233,106 @@ public:
     }
 
     void read_sequences_data() {
-        printf("ALLOC MEM...\n");
-        sequences = new sequences_t[seq_block.sequ_num];
-        printf("SIZE: %gKB\n", (sizeof(sequences_t) * seq_block.sequ_num) / 1024.0f);
+        std::vector<sequences_t> sequ_tmp;
+        sequ_tmp.resize(seq_block.sequ_num);
+        uint32_t index_table[seq_block.sequ_num];
         printf("\nREADING SEQUENCES, COUNT=%d\n", seq_block.sequ_num);
         for (int i = 0; i < seq_block.sequ_num; i++) {
-            printf("\nREADING SEQUENCES #%d...\n", i);
-            fread(&sequences[i], sizeof(sequences_t) - (256 + 8), 1, ftm_file);
-            fread(&sequences[i].data, sequences[i].length, 1, ftm_file);
-            printf("#%d\n", sequences[i].index);
-            printf("TYPE: 0x%X\n", sequences[i].type);
-            printf("LENGTH: %d\n", sequences[i].length);
-            printf("LOOP: %d\n", sequences[i].loop);
+            printf("\nREADING sequ_tmp #%d...\n", i);
+            fread(&sequ_tmp[i], 13, 1, ftm_file);
+            sequ_tmp[i].data.resize(sequ_tmp[i].length);
+            fread(sequ_tmp[i].data.data(), sequ_tmp[i].length, 1, ftm_file);
+            index_table[i] = sequ_tmp[i].index;
+            printf("#%d\n", sequ_tmp[i].index);
+            printf("TYPE: 0x%X\n", sequ_tmp[i].type);
+            printf("LENGTH: %d\n", sequ_tmp[i].length);
+            printf("LOOP: %d\n", sequ_tmp[i].loop);
             printf("DATA:\n");
-            for (int j = 0; j < sequences[i].length; j++) {
-                printf("%d ", sequences[i].data[j]);
+            for (int j = 0; j < sequ_tmp[i].length; j++) {
+                printf("%d ", sequ_tmp[i].data[j]);
             }
             printf("\n");
         }
         printf("\nREADING SEQU SETTING...\n");
         for (int i = 0; i < seq_block.sequ_num; i++) {
             printf("\n#%d\n", i);
-            fread(&sequences[i].release, sizeof(uint32_t), 1, ftm_file);
-            printf("RELEASE: %d\n", sequences[i].release);
-            fread(&sequences[i].setting, sizeof(uint32_t), 1, ftm_file);
-            printf("SETTING: 0x%X\n", sequences[i].setting);
+            fread(&sequ_tmp[i].release, sizeof(uint32_t), 1, ftm_file);
+            printf("RELEASE: %d\n", sequ_tmp[i].release);
+            fread(&sequ_tmp[i].setting, sizeof(uint32_t), 1, ftm_file);
+            printf("SETTING: 0x%X\n", sequ_tmp[i].setting);
+        }
+        printf("Finishing...\n");
+        sequ_max = find_max(index_table, seq_block.sequ_num);
+        sequences.resize(sequ_max + 1);
+        printf("SEQU_MAX: %d\n", sequ_max);
+        for (int i = 0; i < seq_block.sequ_num; i++) {
+            switch (sequ_tmp[i].type) {
+            case 0:
+                sequences[sequ_tmp[i].index].vol = sequ_tmp[i];
+                break;
+
+            case 1:
+                sequences[sequ_tmp[i].index].arp = sequ_tmp[i];
+                break;
+
+            case 2:
+                sequences[sequ_tmp[i].index].pit = sequ_tmp[i];
+                break;
+
+            case 3:
+                sequences[sequ_tmp[i].index].hip = sequ_tmp[i];
+                break;
+
+            case 4:
+                sequences[sequ_tmp[i].index].dty = sequ_tmp[i];
+                break;
+            
+            default:
+                printf("WARNING: #%d UNKNOW TYPE %d\n", i, sequ_tmp[i].type);
+            }
+        }
+        printf("SECCESS.\n");
+        if (getchar() == '1') {
+            printf("\nVOLUME:\n");
+            for (uint32_t i = 0; i < sequ_max; i++) {
+                printf("#%d: %d %d %d -> ", sequences[i].vol.index, sequences[i].vol.length, sequences[i].vol.loop, sequences[i].vol.release);
+                for (int j = 0; j < sequences[i].vol.length; j++) {
+                    printf("%d ", sequences[i].vol.data[j]);
+                }
+                printf("\n");
+            }
+            printf("\nARPEGGIO:\n");
+            for (uint32_t i = 0; i < sequ_max; i++) {
+                printf("#%d: %d %d %d -> ", sequences[i].arp.index, sequences[i].arp.length, sequences[i].arp.loop, sequences[i].arp.release);
+                for (int j = 0; j < sequences[i].arp.length; j++) {
+                    printf("%d ", sequences[i].arp.data[j]);
+                }
+                printf("\n");
+            }
+            printf("\nPITCH:\n");
+            for (uint32_t i = 0; i < sequ_max; i++) {
+                printf("#%d: %d %d %d -> ", sequences[i].pit.index, sequences[i].pit.length, sequences[i].pit.loop, sequences[i].pit.release);
+                for (int j = 0; j < sequences[i].pit.length; j++) {
+                    printf("%d ", sequences[i].pit.data[j]);
+                }
+                printf("\n");
+            }
+            printf("\nHI-PITCH:\n");
+            for (uint32_t i = 0; i < sequ_max; i++) {
+                printf("#%d: %d %d %d -> ", sequences[i].hip.index, sequences[i].hip.length, sequences[i].hip.loop, sequences[i].hip.release);
+                for (int j = 0; j < sequences[i].hip.length; j++) {
+                    printf("%d ", sequences[i].hip.data[j]);
+                }
+                printf("\n");
+            }
+            printf("\nDUTY:\n");
+            for (uint32_t i = 0; i < sequ_max; i++) {
+                printf("#%d: %d %d %d -> ", sequences[i].dty.index, sequences[i].dty.length, sequences[i].dty.loop, sequences[i].dty.release);
+                for (int j = 0; j < sequences[i].dty.length; j++) {
+                    printf("%d ", sequences[i].dty.data[j]);
+                }
+                printf("\n");
+            }
         }
     }
 
