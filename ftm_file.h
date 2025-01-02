@@ -238,7 +238,7 @@ public:
         uint32_t index_table[seq_block.sequ_num];
         printf("\nREADING SEQUENCES, COUNT=%d\n", seq_block.sequ_num);
         for (int i = 0; i < seq_block.sequ_num; i++) {
-            printf("\nREADING sequ_tmp #%d...\n", i);
+            printf("\nREADING SEQUENCES #%d...\n", i);
             fread(&sequ_tmp[i], 13, 1, ftm_file);
             sequ_tmp[i].data.resize(sequ_tmp[i].length);
             fread(sequ_tmp[i].data.data(), sequ_tmp[i].length, 1, ftm_file);
