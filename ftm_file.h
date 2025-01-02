@@ -289,6 +289,7 @@ public:
             
             default:
                 printf("WARNING: #%d UNKNOW TYPE %d\n", i, sequ_tmp[i].type);
+                getchar();
             }
         }
         printf("SECCESS.\n");
