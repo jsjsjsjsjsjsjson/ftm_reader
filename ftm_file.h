@@ -59,6 +59,21 @@ typedef struct __attribute__((packed)) {
     uint32_t sequ_num;
 } SEQUENCES_BLOCK;
 
+typedef struct __attribute__((packed)) {
+    char id[16] = "PATTERNS";
+    uint32_t version = 5;
+    uint32_t size;
+} PATTERN_BLOCK;
+
+typedef struct __attribute__((packed)) {
+    char id[16] = "FRAMES";
+    uint32_t version = 3;
+    uint32_t size;
+    uint32_t frame_num;
+    uint32_t speed = 3;
+    uint32_t tempo = 150;
+    uint32_t pat_length;
+} FRAME_BLOCK;
 
 typedef struct __attribute__((packed)) {
     uint8_t index;
@@ -100,6 +115,31 @@ typedef struct {
     sequences_t dty;
 } sequ_group_t;
 
+typedef struct {
+	uint32_t row;
+    uint8_t note;
+	uint8_t octave;
+	uint8_t instrument;
+	uint8_t volume;
+	uint8_t fxdata[8];
+} ft_item_t;
+
+typedef struct {
+    uint8_t note;
+	uint8_t octave;
+	uint8_t instrument;
+	uint8_t volume;
+	uint8_t fxdata[8];
+} unpk_item_t;
+
+typedef struct {
+    uint32_t track;
+    uint32_t channel;
+    uint32_t index;
+    uint32_t items;
+    std::vector<ft_item_t> item;
+} pattern_t;
+
 uint32_t find_max(uint32_t arr[], size_t n) {
     uint32_t max = arr[0];
     for (size_t i = 1; i < n; i++) {
@@ -109,6 +149,10 @@ uint32_t find_max(uint32_t arr[], size_t n) {
     }
     return max;
 }
+
+const char note2str[13][3] = {
+    "--", "C-", "C#", "D-", "D#", "E-", "F-", "F#", "D-", "D#", "A-", "A#", "B-"
+};
 
 class FTM_FILE {
 public:
@@ -120,10 +164,19 @@ public:
     HEADER_BLOCK he_block;
     INSTRUMENT_BLOCK inst_block;
     SEQUENCES_BLOCK seq_block;
+    FRAME_BLOCK fr_block;
+    PATTERN_BLOCK pt_block;
 
-    uint32_t sequ_max;
+    uint32_t sequ_max = 0;
+    uint32_t pattern_num = 0;
+
     std::vector<sequ_group_t> sequences;
     std::vector<instrument_t> instrument;
+
+    std::vector<std::vector<uint8_t>> frames;
+    std::vector<std::vector<pattern_t>> patterns;
+
+    std::vector<std::vector<std::vector<unpk_item_t>>> unpack_pt;
 
     int open_ftm(const char *filename) {
         ftm_file = fopen(filename, "rb+");
@@ -176,6 +229,10 @@ public:
         fread(&he_block, 1, 25, ftm_file);
 
         fread(&he_block.name, 1, he_block.size - (pr_block.channel * 2) - 1, ftm_file);
+        if (he_block.track_num > 1) {
+            printf("Multi-track FTM files are not supported\n");
+            return;
+        }
 
         for (int i = 0; i < pr_block.channel; i++) {
             fread(&he_block.ch_id[i], 1, 1, ftm_file);
@@ -190,6 +247,7 @@ public:
         for (uint8_t i = 0; i < pr_block.channel; i++) {
             printf("CH%d: EX_FX*%d  ", he_block.ch_id[i], he_block.ch_fx[i]);
         }
+
         printf("\n");
     }
 
@@ -262,6 +320,7 @@ public:
             printf("SETTING: 0x%X\n", sequ_tmp[i].setting);
         }
         printf("Finishing...\n");
+        sequences.clear();
         sequ_max = find_max(index_table, seq_block.sequ_num);
         sequences.resize(sequ_max + 1);
         printf("SEQU_MAX: %d\n", sequ_max);
@@ -337,6 +396,103 @@ public:
         }
     }
 
+    void read_frame_block() {
+        fread(&fr_block, sizeof(FRAME_BLOCK), 1, ftm_file);
+        printf("\nFRAME HEADER: %s\n", fr_block.id);
+        printf("VERSION: %d\n", fr_block.version);
+        printf("SIZE: %d\n", fr_block.size);
+        printf("NUM_FRAMES: %d\n", fr_block.frame_num);
+        printf("PATTERN_LENGTH: %d\n", fr_block.pat_length);
+        printf("SPEED: %d\n", fr_block.speed);
+        printf("TEMPO: %d\n", fr_block.tempo);
+    }
+
+    void read_frame_data() {
+        frames.clear();
+        printf("\nREADING FRAMES, COUNT=%d\n", fr_block.frame_num);
+        for (int i = 0; i < fr_block.frame_num; i++) {
+            std::vector<uint8_t> fr_tmp;
+            fr_tmp.resize(pr_block.channel);
+            fread(fr_tmp.data(), pr_block.channel, 1, ftm_file);
+            frames.push_back(fr_tmp);
+            printf("#%02X: ", i);
+            for (int c = 0; c < pr_block.channel; c++) {
+                printf("%02X ", frames[i][c]);
+            }
+            printf("\n");
+        }
+    }
+
+    void read_pattern_block() {
+        fread(&pt_block, sizeof(PATTERN_BLOCK), 1, ftm_file);
+        printf("\nPATTERN HEADER: %s\n", pt_block.id);
+        printf("VERSION: %d\n", pt_block.version);
+        printf("SIZE: %d\n", pt_block.size);
+    }
+
+    void read_pattern_data() {
+        patterns.clear();
+        patterns.resize(pr_block.channel);
+        unpack_pt.resize(pr_block.channel);
+        size_t pt_end = ftell(ftm_file) + pt_block.size;
+        int count = 0;
+        while (ftell(ftm_file) < pt_end) {
+            pattern_t pt_tmp;
+            fread(&pt_tmp, 4, 4, ftm_file);
+            printf("\n#%d\n", count);
+            printf("TRACK: %d\n", pt_tmp.track);
+            printf("CHANNEL: %d\n", pt_tmp.channel);
+            printf("INDEX: %d\n", pt_tmp.index);
+            printf("ITEMS: %d\n", pt_tmp.items);
+            pt_tmp.item.resize(pt_tmp.items);
+            int item_size = 10 + 2 * he_block.ch_fx[pt_tmp.channel];
+            for (int i = 0; i < pt_tmp.items; i++) {
+                memset(&pt_tmp.item[i].fxdata, 0, 8);
+                fread(&pt_tmp.item[i], 1, item_size, ftm_file);
+            }
+            if (pt_tmp.index >= patterns[pt_tmp.channel].size()) {
+                patterns[pt_tmp.channel].resize(pt_tmp.index + 1);
+                patterns[pt_tmp.channel][pt_tmp.index] = pt_tmp;
+            } else {
+                patterns[pt_tmp.channel][pt_tmp.index] = pt_tmp;
+            }
+            printf("UNPACK...\n");
+            if (pt_tmp.index >= unpack_pt[pt_tmp.channel].size()) {
+                unpack_pt[pt_tmp.channel].resize(pt_tmp.index + 1);
+            }
+            unpack_pt[pt_tmp.channel][pt_tmp.index].resize(fr_block.pat_length);
+            for (int y = 0; y < pt_tmp.items; y++) {
+                unpack_pt[pt_tmp.channel][pt_tmp.index][pt_tmp.item[y].row].note = pt_tmp.item[y].note;
+                unpack_pt[pt_tmp.channel][pt_tmp.index][pt_tmp.item[y].row].octave = pt_tmp.item[y].octave;
+                unpack_pt[pt_tmp.channel][pt_tmp.index][pt_tmp.item[y].row].instrument = pt_tmp.item[y].instrument;
+                unpack_pt[pt_tmp.channel][pt_tmp.index][pt_tmp.item[y].row].volume = pt_tmp.item[y].volume;
+                memcpy(pt_tmp.item[y].fxdata, unpack_pt[pt_tmp.channel][pt_tmp.index][pt_tmp.item[y].row].fxdata, 8);
+            }
+            count++;
+            printf("SECCESS.\n");
+        }
+        pattern_num = count;
+    }
+
+    void print_frame_data(int index) {
+        printf("FRAME #%02X: ", index);
+        for (int c = 0; c < pr_block.channel; c++) {
+            printf("%02X ", frames[index][c]);
+        }
+        printf("\n");
+        for (int y = 0; y < fr_block.pat_length; y++) {
+            printf("#%02X: ", y);
+            for (int x = 0; x < pr_block.channel; x++) {
+                if (frames[index][x] > unpack_pt[x].size()) {
+                    continue;
+                }
+                unpk_item_t pt_tmp = unpack_pt[x][frames[index][x]][y];
+                printf("%s%d %02X %02X | ", note2str[pt_tmp.note], pt_tmp.octave, pt_tmp.volume, pt_tmp.instrument);
+            }
+            printf("\n");
+        }
+    }
+
     void read_ftm_all() {
         read_param_block();
         read_info_block();
@@ -347,6 +503,14 @@ public:
 
         read_sequences_block();
         read_sequences_data();
+
+        read_frame_block();
+        read_frame_data();
+
+        read_pattern_block();
+        read_pattern_data();
+
+        print_frame_data(0);
     }
 };
 
