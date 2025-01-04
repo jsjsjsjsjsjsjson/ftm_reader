@@ -151,7 +151,7 @@ uint32_t find_max(uint32_t arr[], size_t n) {
 }
 
 const char note2str[13][3] = {
-    "--", "C-", "C#", "D-", "D#", "E-", "F-", "F#", "D-", "D#", "A-", "A#", "B-"
+    "--", "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
 };
 
 class FTM_FILE {
