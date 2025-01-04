@@ -97,7 +97,7 @@ typedef struct __attribute__((packed)) {
     char name[64];
 } instrument_t;
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint32_t index;
     uint32_t type;
     uint8_t length;
@@ -106,14 +106,6 @@ typedef struct {
     uint32_t release;
     uint32_t setting;
 } sequences_t;
-
-typedef struct {
-    sequences_t vol;
-    sequences_t arp;
-    sequences_t pit;
-    sequences_t hip;
-    sequences_t dty;
-} sequ_group_t;
 
 typedef struct {
 	uint32_t row;
@@ -150,8 +142,8 @@ uint32_t find_max(uint32_t arr[], size_t n) {
     return max;
 }
 
-const char note2str[13][3] = {
-    "--", "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
+const char note2str[15][3] = {
+    "--", "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-", "==", "XX"
 };
 
 class FTM_FILE {
@@ -170,7 +162,7 @@ public:
     uint32_t sequ_max = 0;
     uint32_t pattern_num = 0;
 
-    std::vector<sequ_group_t> sequences;
+    std::vector<std::vector<sequences_t>> sequences;
     std::vector<instrument_t> instrument;
 
     std::vector<std::vector<uint8_t>> frames;
@@ -291,105 +283,80 @@ public:
     }
 
     void read_sequences_data() {
-        std::vector<sequences_t> sequ_tmp;
-        sequ_tmp.resize(seq_block.sequ_num);
-        uint32_t index_table[seq_block.sequ_num];
+        sequences.resize(instrument[0].seq_count);
+        uint32_t index_map[seq_block.sequ_num][2];
         printf("\nREADING SEQUENCES, COUNT=%d\n", seq_block.sequ_num);
         for (int i = 0; i < seq_block.sequ_num; i++) {
+            sequences_t sequ_tmp;
             printf("\nREADING SEQUENCES #%d...\n", i);
-            fread(&sequ_tmp[i], 13, 1, ftm_file);
-            sequ_tmp[i].data.resize(sequ_tmp[i].length);
-            fread(sequ_tmp[i].data.data(), sequ_tmp[i].length, 1, ftm_file);
-            index_table[i] = sequ_tmp[i].index;
-            printf("#%d\n", sequ_tmp[i].index);
-            printf("TYPE: 0x%X\n", sequ_tmp[i].type);
-            printf("LENGTH: %d\n", sequ_tmp[i].length);
-            printf("LOOP: %d\n", sequ_tmp[i].loop);
+            fread(&sequ_tmp, 13, 1, ftm_file);
+            sequ_tmp.data.resize(sequ_tmp.length);
+            fread(sequ_tmp.data.data(), sequ_tmp.length, 1, ftm_file);
+            printf("#%d\n", sequ_tmp.index);
+            printf("TYPE: 0x%X\n", sequ_tmp.type);
+            printf("LENGTH: %d\n", sequ_tmp.length);
+            printf("LOOP: 0x%08X\n", sequ_tmp.loop);
             printf("DATA:\n");
-            for (int j = 0; j < sequ_tmp[i].length; j++) {
-                printf("%d ", sequ_tmp[i].data[j]);
+            for (int j = 0; j < sequ_tmp.length; j++) {
+                printf("%d ", sequ_tmp.data[j]);
             }
+            if (sequ_tmp.index >= sequences[sequ_tmp.type].size()) {
+                sequences[sequ_tmp.type].resize(sequ_tmp.index + 1);
+                sequences[sequ_tmp.type][sequ_tmp.index] = sequ_tmp;
+            } else {
+                sequences[sequ_tmp.type][sequ_tmp.index] = sequ_tmp;
+            }
+            index_map[i][0] = sequ_tmp.type;
+            index_map[i][1] = sequ_tmp.index;
             printf("\n");
         }
         printf("\nREADING SEQU SETTING...\n");
         for (int i = 0; i < seq_block.sequ_num; i++) {
-            printf("\n#%d\n", i);
-            fread(&sequ_tmp[i].release, sizeof(uint32_t), 1, ftm_file);
-            printf("RELEASE: %d\n", sequ_tmp[i].release);
-            fread(&sequ_tmp[i].setting, sizeof(uint32_t), 1, ftm_file);
-            printf("SETTING: 0x%X\n", sequ_tmp[i].setting);
-        }
-        printf("Finishing...\n");
-        sequences.clear();
-        sequ_max = find_max(index_table, seq_block.sequ_num);
-        sequences.resize(sequ_max + 1);
-        printf("SEQU_MAX: %d\n", sequ_max);
-        for (int i = 0; i < seq_block.sequ_num; i++) {
-            switch (sequ_tmp[i].type) {
-            case 0:
-                sequences[sequ_tmp[i].index].vol = sequ_tmp[i];
-                break;
-
-            case 1:
-                sequences[sequ_tmp[i].index].arp = sequ_tmp[i];
-                break;
-
-            case 2:
-                sequences[sequ_tmp[i].index].pit = sequ_tmp[i];
-                break;
-
-            case 3:
-                sequences[sequ_tmp[i].index].hip = sequ_tmp[i];
-                break;
-
-            case 4:
-                sequences[sequ_tmp[i].index].dty = sequ_tmp[i];
-                break;
-            
-            default:
-                printf("WARNING: #%d UNKNOW TYPE %d\n", i, sequ_tmp[i].type);
-                getchar();
-            }
+            printf("\n#%d: %d, %d\n", i, index_map[i][0], index_map[i][1]);
+            fread(&sequences[index_map[i][0]][index_map[i][1]].release, sizeof(uint32_t), 1, ftm_file);
+            printf("RELEASE: %d\n", sequences[index_map[i][0]][index_map[i][1]].release);
+            fread(&sequences[index_map[i][0]][index_map[i][1]].setting, sizeof(uint32_t), 1, ftm_file);
+            printf("SETTING: 0x%X\n", sequences[index_map[i][0]][index_map[i][1]].setting);
         }
         printf("SECCESS.\n");
         if (getchar() == '1') {
             printf("\nVOLUME:\n");
-            for (uint32_t i = 0; i < sequ_max; i++) {
-                printf("#%d: %d %d %d -> ", sequences[i].vol.index, sequences[i].vol.length, sequences[i].vol.loop, sequences[i].vol.release);
-                for (int j = 0; j < sequences[i].vol.length; j++) {
-                    printf("%d ", sequences[i].vol.data[j]);
+            for (uint32_t i = 0; i < sequences[0].size(); i++) {
+                printf("#%d: %d %d %d -> ", sequences[0][i].index, sequences[0][i].length, sequences[0][i].loop, sequences[0][i].release);
+                for (int j = 0; j < sequences[0][i].length; j++) {
+                    printf("%d ", sequences[0][i].data[j]);
                 }
                 printf("\n");
             }
             printf("\nARPEGGIO:\n");
-            for (uint32_t i = 0; i < sequ_max; i++) {
-                printf("#%d: %d %d %d -> ", sequences[i].arp.index, sequences[i].arp.length, sequences[i].arp.loop, sequences[i].arp.release);
-                for (int j = 0; j < sequences[i].arp.length; j++) {
-                    printf("%d ", sequences[i].arp.data[j]);
+            for (uint32_t i = 0; i < sequences[1].size(); i++) {
+                printf("#%d: %d %d %d -> ", sequences[1][i].index, sequences[1][i].length, sequences[1][i].loop, sequences[1][i].release);
+                for (int j = 0; j < sequences[1][i].length; j++) {
+                    printf("%d ", sequences[1][i].data[j]);
                 }
                 printf("\n");
             }
             printf("\nPITCH:\n");
-            for (uint32_t i = 0; i < sequ_max; i++) {
-                printf("#%d: %d %d %d -> ", sequences[i].pit.index, sequences[i].pit.length, sequences[i].pit.loop, sequences[i].pit.release);
-                for (int j = 0; j < sequences[i].pit.length; j++) {
-                    printf("%d ", sequences[i].pit.data[j]);
+            for (uint32_t i = 0; i < sequences[2].size(); i++) {
+                printf("#%d: %d %d %d -> ", sequences[2][i].index, sequences[2][i].length, sequences[2][i].loop, sequences[2][i].release);
+                for (int j = 0; j < sequences[2][i].length; j++) {
+                    printf("%d ", sequences[2][i].data[j]);
                 }
                 printf("\n");
             }
             printf("\nHI-PITCH:\n");
-            for (uint32_t i = 0; i < sequ_max; i++) {
-                printf("#%d: %d %d %d -> ", sequences[i].hip.index, sequences[i].hip.length, sequences[i].hip.loop, sequences[i].hip.release);
-                for (int j = 0; j < sequences[i].hip.length; j++) {
-                    printf("%d ", sequences[i].hip.data[j]);
+            for (uint32_t i = 0; i < sequences[3].size(); i++) {
+                printf("#%d: %d %d %d -> ", sequences[3][i].index, sequences[3][i].length, sequences[3][i].loop, sequences[3][i].release);
+                for (int j = 0; j < sequences[3][i].length; j++) {
+                    printf("%d ", sequences[3][i].data[j]);
                 }
                 printf("\n");
             }
             printf("\nDUTY:\n");
-            for (uint32_t i = 0; i < sequ_max; i++) {
-                printf("#%d: %d %d %d -> ", sequences[i].dty.index, sequences[i].dty.length, sequences[i].dty.loop, sequences[i].dty.release);
-                for (int j = 0; j < sequences[i].dty.length; j++) {
-                    printf("%d ", sequences[i].dty.data[j]);
+            for (uint32_t i = 0; i < sequences[4].size(); i++) {
+                printf("#%d: %d %d %d -> ", sequences[4][i].index, sequences[4][i].length, sequences[4][i].loop, sequences[4][i].release);
+                for (int j = 0; j < sequences[4][i].length; j++) {
+                    printf("%d ", sequences[4][i].data[j]);
                 }
                 printf("\n");
             }
@@ -439,11 +406,11 @@ public:
         while (ftell(ftm_file) < pt_end) {
             pattern_t pt_tmp;
             fread(&pt_tmp, 4, 4, ftm_file);
-            printf("\n#%d\n", count);
-            printf("TRACK: %d\n", pt_tmp.track);
-            printf("CHANNEL: %d\n", pt_tmp.channel);
-            printf("INDEX: %d\n", pt_tmp.index);
-            printf("ITEMS: %d\n", pt_tmp.items);
+            // printf("\n#%d\n", count);
+            // printf("TRACK: %d\n", pt_tmp.track);
+            // printf("CHANNEL: %d\n", pt_tmp.channel);
+            // printf("INDEX: %d\n", pt_tmp.index);
+            // printf("ITEMS: %d\n", pt_tmp.items);
             pt_tmp.item.resize(pt_tmp.items);
             int item_size = 10 + 2 * he_block.ch_fx[pt_tmp.channel];
             for (int i = 0; i < pt_tmp.items; i++) {
@@ -456,7 +423,7 @@ public:
             } else {
                 patterns[pt_tmp.channel][pt_tmp.index] = pt_tmp;
             }
-            printf("UNPACK...\n");
+            // printf("UNPACK...\n");
             if (pt_tmp.index >= unpack_pt[pt_tmp.channel].size()) {
                 unpack_pt[pt_tmp.channel].resize(pt_tmp.index + 1);
             }
@@ -469,7 +436,7 @@ public:
                 memcpy(pt_tmp.item[y].fxdata, unpack_pt[pt_tmp.channel][pt_tmp.index][pt_tmp.item[y].row].fxdata, 8);
             }
             count++;
-            printf("SECCESS.\n");
+            // printf("SECCESS.\n");
         }
         pattern_num = count;
     }
@@ -481,7 +448,7 @@ public:
         }
         printf("\n");
         for (int y = 0; y < fr_block.pat_length; y++) {
-            printf("#%02X: ", y);
+            printf("#%02X| ", y);
             for (int x = 0; x < pr_block.channel; x++) {
                 if (frames[index][x] > unpack_pt[x].size()) {
                     continue;
@@ -510,7 +477,7 @@ public:
         read_pattern_block();
         read_pattern_data();
 
-        print_frame_data(0);
+        print_frame_data(1);
     }
 };
 
